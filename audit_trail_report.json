@@ -1,0 +1,9 @@
+{
+    "human_choices": {
+        "missing_strategy": "Impute with Median/Mean (Standard)",
+        "target_col": "size",
+        "problem_type": "Classification",
+        "outlier_strategy": "Cap / Winsorize Outliers"
+    },
+    "agent_actions": []
+}
