@@ -2,8 +2,7 @@ import os
 import json
 import joblib
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+import plotly.express as px
 import gradio as gr
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -65,7 +64,7 @@ def generate_pdf_report(markdown_text, output_pdf_path="Executive_Report.pdf"):
     doc.build(story)
     return output_pdf_path
 
-# --- BACKEND PIPELINE WITH COMPREHENSIVE GUARDRAILS ---
+# --- BACKEND PIPELINE WITH INTERACTIVE PLOTLY VISUALIZATIONS ---
 def run_governed_pipeline(file_obj, sample_choice, missing_strategy, target_col, problem_type, outlier_strategy):
     if file_obj is not None:
         file_path = file_obj.name
@@ -74,12 +73,11 @@ def run_governed_pipeline(file_obj, sample_choice, missing_strategy, target_col,
     elif sample_choice == "Bank Loan CSV Data (.csv)":
         file_path = "sample_data/bank_loan_sample.csv"
     else:
-        return None, None, None, [], "", None, "**[ERROR]**: Please upload a dataset or select a sample dataset.", gr.update(), "", ""
+        return None, None, None, {}, {}, {}, "", None, "**[ERROR]**: Please upload a dataset or select a sample dataset.", gr.update(), "", ""
 
     logs = ["**[AuraData Guardrail Engine]**: Initializing comprehensive security & governance protocols..."]
 
     try:
-        # Guardrail 1: Universal File Format Ingestion with robust fallback
         ext = os.path.splitext(file_path)[1].lower()
         if ext == '.csv' or not ext:
             df = pd.read_csv(file_path, encoding='utf-8', on_bad_lines='skip')
@@ -95,22 +93,18 @@ def run_governed_pipeline(file_obj, sample_choice, missing_strategy, target_col,
         df.columns = [str(col).strip().lower().replace(" ", "_") for col in df.columns]
         total_initial_rows = len(df)
 
-        # Guardrail 2: Target Column Existence Check
         if target_col not in df.columns:
-            return None, None, None, [], "", None, f"❌ **[Guardrail Error]**: Target column `{target_col}` not found in dataset schema.", gr.update(), "", "\n".join(logs)
+            return None, None, None, {}, {}, {}, "", None, f"❌ **[Guardrail Error]**: Target column `{target_col}` not found in dataset schema.", gr.update(), "", "\n".join(logs)
 
-        # Guardrail 3: Large File Scale Optimization (> 100k rows)
         if total_initial_rows > 100000:
             logs.append(f"⚠️ **[Scale Guardrail]**: Large dataset detected ({total_initial_rows:,} rows). Applying memory-optimized random sampling (100k rows).")
             df = df.sample(n=100000, random_state=42).reset_index(drop=True)
 
-        # Duplicate Cleanse
         dups = df.duplicated().sum()
         if dups > 0:
             df = df.drop_duplicates()
             logs.append(f"**[Data Hygiene]**: Purged **{dups}** duplicate records.")
 
-        # Guardrail 4: Intelligent Missing Value & Critical Column Protection
         critical_keywords = ['id', 'account', 'uuid', 'ssn', 'key', 'code']
         for col in df.columns:
             null_count = df[col].isnull().sum()
@@ -127,7 +121,6 @@ def run_governed_pipeline(file_obj, sample_choice, missing_strategy, target_col,
                     else:
                         df[col] = df[col].fillna(df[col].median() if pd.api.types.is_numeric_dtype(df[col]) else "Unknown")
 
-        # Outlier Treatment (Numeric only)
         for col in df.select_dtypes(include=['number']).columns:
             if col == target_col: continue
             Q1, Q3 = df[col].quantile(0.25), df[col].quantile(0.75)
@@ -140,25 +133,23 @@ def run_governed_pipeline(file_obj, sample_choice, missing_strategy, target_col,
         df.to_csv(cleaned_csv_path, index=False)
         logs.append("**[Governance Complete]**: Sanitized schema successfully compiled.")
 
-        # Visualizations: Correlation Matrix
-        os.makedirs("generated_charts", exist_ok=True)
-        chart_paths = []
+        # --- ADVANCED INTERACTIVE PLOTLY VISUALIZATIONS ---
         num_df = df.select_dtypes(include=['number'])
-        
+        fig_corr = {}
         if len(num_df.columns) > 1:
-            plt.figure(figsize=(7, 4))
-            sns.heatmap(num_df.corr(numeric_only=True), annot=True, cmap="Blues", fmt=".2f")
-            plt.title("Inter-Feature Correlation Matrix", fontsize=12, fontweight='bold')
-            h_path = "generated_charts/correlation_heatmap.png"
-            plt.savefig(h_path, bbox_inches='tight')
-            plt.close()
-            chart_paths.append(h_path)
+            corr_matrix = num_df.corr(numeric_only=True)
+            fig_corr = px.imshow(
+                corr_matrix, 
+                text_auto=True, 
+                aspect="auto", 
+                color_continuous_scale="Blues",
+                title="<b>Interactive Inter-Feature Correlation Heatmap</b>"
+            )
+            fig_corr.update_layout(template="plotly_white", margin=dict(t=50, l=50, r=50, b=50))
 
-        # Smart Feature Encoding & Target Encoding
         df_ml = df.copy()
         y_raw = df_ml[target_col]
         
-        # Guardrail 5: Problem-Type Auto-Correction
         unique_target_count = y_raw.nunique()
         is_numeric_target = pd.api.types.is_numeric_dtype(y_raw)
         
@@ -176,12 +167,8 @@ def run_governed_pipeline(file_obj, sample_choice, missing_strategy, target_col,
             target_uniques = None
 
         df_ml_features = df_ml.drop(columns=[target_col])
-
         exclude_keywords = ['id', 'name', 'code', 'date', 'uuid', 'account']
-        filtered_cols = [
-            c for c in df_ml_features.columns 
-            if not any(k in c for k in exclude_keywords)
-        ]
+        filtered_cols = [c for c in df_ml_features.columns if not any(k in c for k in exclude_keywords)]
         df_ml_features = df_ml_features[filtered_cols]
 
         cat_mappings = {}
@@ -191,8 +178,6 @@ def run_governed_pipeline(file_obj, sample_choice, missing_strategy, target_col,
             cat_mappings[col] = list(uniques)
 
         df_encoded = df_ml_features.astype(float)
-
-        # Track feature bounds for prediction bounds guardrail
         feature_bounds = {col: (float(df_encoded[col].min()), float(df_encoded[col].max())) for col in df_encoded.columns}
 
         scaler = StandardScaler()
@@ -222,7 +207,6 @@ def run_governed_pipeline(file_obj, sample_choice, missing_strategy, target_col,
         is_class = (problem_type == "Classification" or len(pd.unique(y)) < 20)
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
-        # Guardrail 6: Model Training Fallback Error Handler
         try:
             if is_class:
                 best_model = LogisticRegression(max_iter=5000, class_weight='balanced', random_state=42, solver='liblinear').fit(X_train, y_train)
@@ -238,26 +222,36 @@ def run_governed_pipeline(file_obj, sample_choice, missing_strategy, target_col,
             best_score = mean_squared_error(y_test, best_model.predict(X_test))
             best_name = "Linear Regression (Fallback)"
 
-        # Save model state including bounds guardrails
         joblib.dump((best_model, top_features, scaler, df_encoded.columns, cat_mappings, target_uniques, feature_bounds), "best_trained_model.pkl")
         logs.append(f"**[Model Tournament Winner]**: **{best_name}** trained on **Top {len(top_features)} Features** with score **{best_score:.4f}**.")
 
-        # Feature Importance Visualization
-        plt.figure(figsize=(7, 4))
         if hasattr(best_model, "coef_"):
             importances = pd.Series(abs(best_model.coef_[0]), index=top_features).nlargest(5)
         elif hasattr(best_model, "feature_importances_"):
             importances = pd.Series(best_model.feature_importances_, index=top_features).nlargest(5)
         else:
             importances = pd.Series([1]*len(top_features), index=top_features)
-            
-        importances.plot(kind='barh', color='#2563EB')
-        plt.title(f"Top 5 Decision Drivers ({best_name})", fontsize=12, fontweight='bold')
-        plt.xlabel("Absolute Feature Weight")
-        imp_path = "generated_charts/feature_importance.png"
-        plt.savefig(imp_path, bbox_inches='tight')
-        plt.close()
-        chart_paths.append(imp_path)
+
+        fig_imp = px.bar(
+            x=importances.values, 
+            y=importances.index, 
+            orientation='h',
+            labels={'x': 'Absolute Feature Weight', 'y': 'Top Predictive Features'},
+            title=f"<b>Top 5 Decision Drivers ({best_name})</b>",
+            color=importances.values,
+            color_continuous_scale="Blues"
+        )
+        fig_imp.update_layout(template="plotly_white", margin=dict(t=50, l=50, r=50, b=50), showlegend=False)
+
+        top_feat_primary = top_features[0] if top_features else df.columns[0]
+        fig_dist = px.box(
+            df, 
+            x=target_col, 
+            y=top_feat_primary, 
+            color=str(target_col) if df[target_col].nunique() < 10 else None,
+            title=f"<b>Distribution of Top Feature ({top_feat_primary}) across Target ({target_col})</b>"
+        )
+        fig_dist.update_layout(template="plotly_white", margin=dict(t=50, l=50, r=50, b=50))
 
         report_md = f"""# **Executive Business Intelligence & Predictive Analytics Report**
 **Platform**: AuraData Enterprise Studio | **Target Variable Analysed**: `{target_col}`
@@ -294,10 +288,10 @@ This technical intelligence report evaluates **{total_initial_rows:,}** observat
         feature_guide = f"**Required Input Schema (Top {len(top_features)} Features Only)**:\n{hints_str}\n*(Example Input Format: `{example_str}`)*"
         updated_textbox = gr.update(value="", placeholder=f"e.g. {example_str}")
 
-        return df.head(10), cleaned_csv_path, "best_trained_model.pkl", chart_paths, report_md, pdf_path, scorecard, feature_guide, updated_textbox, "\n".join(logs)
+        return df.head(10), cleaned_csv_path, "best_trained_model.pkl", fig_corr, fig_imp, fig_dist, report_md, pdf_path, scorecard, feature_guide, updated_textbox, "\n".join(logs)
 
     except Exception as e:
-        return None, None, None, [], "", None, f"❌ **Execution Failed**: {str(e)}", gr.update(placeholder="Enter values..."), "", ""
+        return None, None, None, {}, {}, {}, "", None, f"❌ **Execution Failed**: {str(e)}", gr.update(placeholder="Enter values..."), "", ""
 
 def get_columns(file_obj, sample_choice):
     if file_obj is not None:
@@ -352,7 +346,6 @@ def make_prediction(feat_str):
                     warnings.append(f"⚠️ Category `{val_str}` for `{feat}` unknown; defaulted safely.")
             else:
                 num_val = float(val_str)
-                # Guardrail 7: Prediction Bounds & Outlier Warning Check
                 if feat in feature_bounds:
                     b_min, b_max = feature_bounds[feat]
                     if num_val < b_min or num_val > b_max:
@@ -389,8 +382,8 @@ def make_prediction(feat_str):
         return f"❌ **Prediction Error**: {str(e)}"
 
 # --- INTERACTIVE GRADIO WEB APPLICATION INTERFACE ---
-with gr.Blocks(title="AuraData Data Science Studio") as demo:
-    gr.Markdown("# **AuraData Data Science Studio**")
+with gr.Blocks(title="AuraData Enterprise Studio") as demo:
+    gr.Markdown("# **AuraData Enterprise Data Science Studio**")
     gr.Markdown("### **Autonomous Data Cleansing, Machine Learning Tournaments, & Executive Reporting.**")
     
     tabs = gr.Tabs()
@@ -420,8 +413,16 @@ with gr.Blocks(title="AuraData Data Science Studio") as demo:
             next_btn_1 = gr.Button("Proceed to Visualizations & Feature Drivers ➡️", variant="primary")
 
         with gr.Tab("2. Visualizations & Feature Drivers", id=1):
-            gr.Markdown("### **Exploratory Analytics & Decision Driver Plots**")
-            charts_gallery = gr.Gallery(label="Generated Diagnostic & Feature Importance Plots", columns=2, height="auto")
+            gr.Markdown("### **Interactive Exploratory Analytics & Decision Driver Plots**")
+            gr.Markdown("*Tip: Use your mouse to zoom in/out, pan, and hover over data points for exact values.*")
+            
+            with gr.Row():
+                plot_corr = gr.Plot(label="Correlation Heatmap")
+                plot_imp = gr.Plot(label="Feature Importance")
+            
+            with gr.Row():
+                plot_dist = gr.Plot(label="Feature Distribution vs Target")
+            
             data_preview = gr.DataFrame(label="Cleaned Data Table")
             
             gr.Markdown("---")
@@ -462,7 +463,7 @@ with gr.Blocks(title="AuraData Data Science Studio") as demo:
     run_btn.click(
         fn=run_governed_pipeline,
         inputs=[file_input, sample_dropdown, missing_dropdown, target_dropdown, problem_dropdown, outlier_dropdown],
-        outputs=[data_preview, dl_csv, dl_model, charts_gallery, report_view, dl_pdf, scorecard_box, prediction_schema_guide, feature_input, logs_box]
+        outputs=[data_preview, dl_csv, dl_model, plot_corr, plot_imp, plot_dist, report_view, dl_pdf, scorecard_box, prediction_schema_guide, feature_input, logs_box]
     )
 
     next_btn_1.click(lambda: gr.Tabs(selected=1), outputs=tabs)
